@@ -247,7 +247,7 @@ func (r *Request) GetAuthorizationHeaderParameters() (map[string]string, error) 
 
 	for _, parameter := range authValues {
 		parameter = strings.TrimSpace(parameter)
-		parameterParts := strings.SplitN(parameter, ",", 2)
+		parameterParts := strings.SplitN(parameter, "=", 2)
 		if len(parameterParts) != 2 {
 			return nil, stacktrace.NewError(
 				"Invalid authorization header: missing '=' in "+
@@ -599,80 +599,37 @@ func (r *Request) GetCanonicalRequest() ([]byte, error) {
 				"content-type header")
 	}
 
+	// Note: writes to bytes.Buffer always panic instead of returning an
+	// error.
 	creq := new(bytes.Buffer)
-	_, err = creq.WriteString(r.RequestMethod)
-	if err != nil {
-		return nil, stacktrace.Propagate(err, msgFailedToGetCReqBuf)
-	}
-
-	err = creq.WriteByte('\n')
-	if err != nil {
-		return nil, stacktrace.Propagate(err, msgFailedToGetCReqBuf)
-	}
-
-	_, err = creq.WriteString(canonicalURIPath)
-	if err != nil {
-		return nil, stacktrace.Propagate(err, msgFailedToGetCReqBuf)
-	}
-
-	err = creq.WriteByte('\n')
-	if err != nil {
-		return nil, stacktrace.Propagate(err, msgFailedToGetCReqBuf)
-	}
-
-	_, err = creq.WriteString(canonicalQueryString)
-	if err != nil {
-		return nil, stacktrace.Propagate(err, msgFailedToGetCReqBuf)
-	}
+	creq.WriteString(r.RequestMethod)
+	creq.WriteByte('\n')
+	creq.WriteString(canonicalURIPath)
+	creq.WriteByte('\n')
+	creq.WriteString(canonicalQueryString)
+	creq.WriteByte('\n')
 
 	for _, signedHeader := range signedHeaders {
-		err = creq.WriteByte('\n')
-		if err != nil {
-			return nil, stacktrace.Propagate(err, msgFailedToGetCReqBuf)
-		}
-
-		_, err = creq.WriteString(signedHeader.Name)
-		if err != nil {
-			return nil, stacktrace.Propagate(err, msgFailedToGetCReqBuf)
-		}
-
-		err = creq.WriteByte(':')
-		if err != nil {
-			return nil, stacktrace.Propagate(err, msgFailedToGetCReqBuf)
-		}
-
-		_, err = creq.WriteString(signedHeader.Value)
-		if err != nil {
-			return nil, stacktrace.Propagate(err, msgFailedToGetCReqBuf)
-		}
+		creq.WriteString(signedHeader.Name)
+		creq.WriteByte(':')
+		creq.WriteString(signedHeader.Value)
+		creq.WriteByte('\n')
 	}
 
-	err = creq.WriteByte('\n')
-	if err != nil {
-		return nil, stacktrace.Propagate(err, msgFailedToGetCReqBuf)
-	}
+	creq.WriteByte('\n')
 
 	firstHeader := true
 	for _, signedHeader := range signedHeaders {
 		if firstHeader {
 			firstHeader = false
 		} else {
-			err = creq.WriteByte(';')
-			if err != nil {
-				return nil, stacktrace.Propagate(err, msgFailedToGetCReqBuf)
-			}
+			creq.WriteByte(';')
 		}
 
-		_, err = creq.WriteString(signedHeader.Name)
-		if err != nil {
-			return nil, stacktrace.Propagate(err, msgFailedToGetCReqBuf)
-		}
+		creq.WriteString(signedHeader.Name)
 	}
 
-	err = creq.WriteByte('\n')
-	if err != nil {
-		return nil, stacktrace.Propagate(err, msgFailedToGetCReqBuf)
-	}
+	creq.WriteByte('\n')
 
 	var bodyHexDigest string
 	if contentType == keyApplicationXWWWFormURLEncoded {
@@ -683,11 +640,7 @@ func (r *Request) GetCanonicalRequest() ([]byte, error) {
 		bodyHexDigest = r.GetBodyDigest()
 	}
 
-	_, err = creq.WriteString(bodyHexDigest)
-	if err != nil {
-		return nil, stacktrace.Propagate(err, msgFailedToGetCReqBuf)
-	}
-
+	creq.WriteString(bodyHexDigest)
 	return creq.Bytes(), nil
 }
 
@@ -766,12 +719,21 @@ func (r *Request) GetExpectedSignature(secretKeyFn func(string, string) (string,
 				"sign")
 	}
 
-	kDate := hmac.New(sha256.New, []byte(keyAWS4+secretKey)).Sum([]byte(reqDate))
-	kRegion := hmac.New(sha256.New, kDate).Sum([]byte(r.Region))
-	kService := hmac.New(sha256.New, kRegion).Sum([]byte(r.Service))
-	kSigning := hmac.New(sha256.New, kService).Sum([]byte(keyAWS4Request))
-	signature := hmac.New(sha256.New, kSigning).Sum([]byte(sts))
-
+	kDateHasher := hmac.New(sha256.New, []byte(keyAWS4+secretKey))
+	kDateHasher.Write([]byte(reqDate))
+	kDate := kDateHasher.Sum(nil)
+	kRegionHasher := hmac.New(sha256.New, kDate)
+	kRegionHasher.Write([]byte(r.Region))
+	kRegion := kRegionHasher.Sum(nil)
+	kServiceHasher := hmac.New(sha256.New, kRegion)
+	kServiceHasher.Write([]byte(r.Service))
+	kService := kServiceHasher.Sum(nil)
+	kSigningHasher := hmac.New(sha256.New, kService)
+	kSigningHasher.Write([]byte(keyAWS4Request))
+	kSigning := kSigningHasher.Sum(nil)
+	signatureHasher := hmac.New(sha256.New, kSigning)
+	signatureHasher.Write([]byte(sts))
+	signature := signatureHasher.Sum(nil)
 	return hex.EncodeToString(signature), nil
 }
 
@@ -998,6 +960,7 @@ func CanonicalizeURIPath(uriPath string) (string, error) {
 
 		default:
 			// Leave it alone; proceed to the next component.
+			components[i] = component
 			i++
 		}
 	}
