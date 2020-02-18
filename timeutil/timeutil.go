@@ -14,13 +14,15 @@ import (
 // is in UTC, and returns the time zone as 'Z'.
 const ISO8601CompactFormat = "20060102T150405Z"
 
-var iso8601Variants [4]*regexp.Regexp
+var iso8601Variants [6]*regexp.Regexp
 
 func init() {
 	iso8601Variants[0] = regexp.MustCompile(`^([0-9]{4})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[Tt ]([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9]|6[01])(?:[.,]([0-9]{1,9}))?(Z|[-+][01]:?(?:[0-5][0-9])?)$`)
 	iso8601Variants[1] = regexp.MustCompile(`^([0-9]{4})(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])[Tt ]([01][0-9]|2[0-3])([0-5][0-9])([0-5][0-9]|6[01])(?:[.,]([0-9]{1,9}))?(Z|[-+][01]:?(?:[0-5][0-9])?)$`)
 	iso8601Variants[2] = regexp.MustCompile(`^([0-9]{4})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[Tt ]([01][0-9]|2[0-3])([0-5][0-9])([0-5][0-9]|6[01])(?:[.,]([0-9]{1,9}))?(Z|[-+][01]?(?:[0-5][0-9])?)$`)
 	iso8601Variants[3] = regexp.MustCompile(`^([0-9]{4})(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])[Tt ]([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9]|6[01])(?:[.,]([0-9]{1,9}))?(Z|[-+][01]:?(?:[0-5][0-9])?)$`)
+	iso8601Variants[4] = regexp.MustCompile(`^([0-9]{4})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$`)
+	iso8601Variants[5] = regexp.MustCompile(`^([0-9]{4})(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])$`)
 }
 
 func atoip(s string) int {
@@ -38,26 +40,39 @@ func atoip(s string) int {
 func ParseISO8601Timestamp(s string) (time.Time, error) {
 	for _, re := range iso8601Variants {
 		if re.MatchString(s) {
+			var year, day, hour, minute, second, nanosecs int
+			var month time.Month
+			var fracSecStr, tzStr string
+
 			parts := re.FindStringSubmatch(s)
-			year := atoip(parts[1])
-			month := time.Month(atoip(parts[2]))
-			day := atoip(parts[3])
-			hour := atoip(parts[4])
-			minute := atoip(parts[5])
-			second := atoip(parts[6])
-			fracSecStr := parts[7]
-			nanosecs := 0
-			var loc *time.Location
+			year = atoip(parts[1])
+			month = time.Month(atoip(parts[2]))
+			day = atoip(parts[3])
+			nanosecs = 0
 
-			if fracSecStr != "" {
-				for len(fracSecStr) < 9 {
-					fracSecStr = fracSecStr + "0"
+			if len(parts) > 4 {
+				hour = atoip(parts[4])
+				minute = atoip(parts[5])
+				second = atoip(parts[6])
+				fracSecStr = parts[7]
+
+				if fracSecStr != "" {
+					for len(fracSecStr) < 9 {
+						fracSecStr = fracSecStr + "0"
+					}
+
+					nanosecs = atoip(fracSecStr)
 				}
-
-				nanosecs = atoip(fracSecStr)
 			}
 
-			tzStr := parts[8]
+			var loc *time.Location
+
+			if len(parts) > 4 {
+				tzStr = parts[8]
+			} else {
+				tzStr = "Z"
+			}
+
 			if tzStr == "Z" {
 				loc = time.UTC
 			} else {
