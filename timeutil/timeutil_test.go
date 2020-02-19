@@ -20,4 +20,8 @@ func TestValidDates(t *testing.T) {
 			t.Errorf("Incorrect timestamp value for %#v: expected 1900-12-31T00:00:00Z, got %v", s, ts)
 		}
 	}
+
+	if _, err := ParseISO8601Timestamp("2020-02-17T11:39:27.658731+00:00"); err != nil {
+		t.Errorf("Failed to parse timestamp: %#v %#v\n", "2020-02-17T11:39:27.658731+00:00", err)
+	}
 }
